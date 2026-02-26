@@ -1,0 +1,8 @@
+﻿# 指定新闻源（RSS）
+sources:
+  - name: 36Kr
+    url: https://36kr.com/feed
+  - name: 量子位
+    url: https://www.qbitai.com/feed
+  - name: 中国星市场
+    url: https://www.chinastarmarket.cn/feed
