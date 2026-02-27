@@ -1,10 +1,18 @@
 # 指定新闻源（RSS）
 sources:
-  - name: 36Kr
-    url: https://36kr.com/feed
   - name: 量子位
     url: https://www.qbitai.com/feed
-  - name: 中国星市场
-    url: https://www.chinastarmarket.cn/feed
-  - name: 中国星市场专题
-    url: https://www.chinastarmarket.cn/subject/1321
+  - name: 36Kr
+    url: https://36kr.com/feed
+  - name: TechCrunch AI
+    url: https://techcrunch.com/category/artificial-intelligence/feed/
+  - name: VentureBeat AI
+    url: https://venturebeat.com/category/ai/feed/
+  - name: Google AI Blog
+    url: https://blog.google/technology/ai/rss/
+  - name: OpenAI News
+    url: https://openai.com/news/rss.xml
+  - name: Hugging Face Blog
+    url: https://huggingface.co/blog/feed.xml
+  - name: arXiv cs.AI
+    url: https://arxiv.org/rss/cs.AI
