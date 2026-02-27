@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
+from xml.etree import ElementTree as ET
 
 import feedparser
 import requests
@@ -22,6 +24,12 @@ logging.basicConfig(
 
 UTC = timezone.utc
 CHINA_TZ = timezone(timedelta(hours=8))
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
+}
 
 # Focus tracks:
 # 1) AI coding and agents
@@ -92,6 +100,110 @@ def get_yesterday_range_utc(now_utc: datetime) -> tuple[datetime, datetime, str]
     return start_cn.astimezone(UTC), end_cn.astimezone(UTC), yesterday_cn_date.isoformat()
 
 
+def _extract_next_data_json(html_text: str) -> dict[str, Any] | None:
+    match = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        html_text,
+        re.S,
+    )
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(1))
+    except Exception:
+        return None
+
+
+def fetch_chinastarmarket_for_yesterday(
+    source_name: str, source_url: str, start_utc: datetime, end_utc: datetime
+) -> list[NewsItem]:
+    target_cn_date = start_utc.astimezone(CHINA_TZ).date()
+    month_str = target_cn_date.strftime("%Y%m")
+    sitemap_url = f"https://rss.chinastarmarket.cn/kcb/baidu/{month_str}/sitemap.xml"
+
+    subject_id: str | None = None
+    subject_match = re.search(r"/subject/(\d+)", source_url)
+    if subject_match:
+        subject_id = subject_match.group(1)
+
+    try:
+        resp = requests.get(sitemap_url, headers=DEFAULT_HEADERS, timeout=20)
+        resp.raise_for_status()
+        root = ET.fromstring(resp.text)
+    except Exception as exc:
+        logging.warning("中国星市场 sitemap 获取失败: %s - %s", source_name, exc)
+        return []
+
+    candidate_links: list[str] = []
+    for url_node in root.findall("./url"):
+        loc = (url_node.findtext("loc") or "").strip()
+        lastmod = (url_node.findtext("lastmod") or "").strip()
+        if not loc or "/detail/" not in loc:
+            continue
+        if lastmod[:10] != target_cn_date.isoformat():
+            continue
+        candidate_links.append(loc)
+
+    # Cap detail-page requests to control runtime in CI.
+    max_detail_fetch = 120
+    if len(candidate_links) > max_detail_fetch:
+        candidate_links = candidate_links[:max_detail_fetch]
+
+    result: list[NewsItem] = []
+    for link in candidate_links:
+        try:
+            detail_resp = requests.get(link, headers=DEFAULT_HEADERS, timeout=20)
+            detail_resp.raise_for_status()
+            next_data = _extract_next_data_json(detail_resp.text)
+            if not next_data:
+                continue
+
+            article = (
+                next_data.get("props", {})
+                .get("pageProps", {})
+                .get("data", {})
+            )
+            if not isinstance(article, dict):
+                continue
+
+            subjects = article.get("subject") or []
+            if subject_id:
+                if not any(
+                    isinstance(s, dict) and str(s.get("id", "")) == subject_id
+                    for s in subjects
+                ):
+                    continue
+
+            ctime = article.get("ctime")
+            if not isinstance(ctime, (int, float)):
+                continue
+
+            dt = datetime.fromtimestamp(ctime, tz=CHINA_TZ).astimezone(UTC)
+            if not (start_utc <= dt < end_utc):
+                continue
+
+            title = str(article.get("title") or "").strip()
+            summary = str(article.get("brief") or article.get("content") or "").strip()
+            if not title:
+                continue
+
+            result.append(
+                NewsItem(
+                    source_name=source_name,
+                    title=title,
+                    link=link,
+                    published_utc=dt,
+                    summary=summary,
+                )
+            )
+        except Exception:
+            continue
+
+    logging.info("ChinaStarMarket HTML collected: %s -> %d items", source_name, len(result))
+    return result
+
+
 def fetch_news_for_yesterday(sources: list[dict[str, str]], start_utc: datetime, end_utc: datetime) -> list[NewsItem]:
     items: list[NewsItem] = []
 
@@ -99,6 +211,12 @@ def fetch_news_for_yesterday(sources: list[dict[str, str]], start_utc: datetime,
         name = source.get("name", "Unknown")
         url = source.get("url", "").strip()
         if not url:
+            continue
+
+        parsed = urlparse(url)
+        if "chinastarmarket.cn" in parsed.netloc.lower() and "/subject/" in parsed.path:
+            logging.info("Fetching ChinaStarMarket HTML: %s (%s)", name, url)
+            items.extend(fetch_chinastarmarket_for_yesterday(name, url, start_utc, end_utc))
             continue
 
         logging.info("Fetching RSS: %s (%s)", name, url)
