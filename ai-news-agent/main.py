@@ -115,35 +115,70 @@ def _extract_next_data_json(html_text: str) -> dict[str, Any] | None:
         return None
 
 
+def _collect_chinastarmarket_detail_links(
+    month_str: str, target_cn_date_str: str
+) -> list[str]:
+    sitemap_candidates: list[str] = []
+    index_url = "https://www.chinastarmarket.cn/sitemap.xml"
+    fallback_url = f"https://rss.chinastarmarket.cn/kcb/baidu/{month_str}/sitemap.xml"
+
+    try:
+        idx_resp = requests.get(index_url, headers=DEFAULT_HEADERS, timeout=20)
+        idx_resp.raise_for_status()
+        idx_root = ET.fromstring(idx_resp.text)
+        for node in idx_root.findall("./sitemap"):
+            loc = (node.findtext("loc") or "").strip()
+            if f"/{month_str}/sitemap.xml" in loc:
+                sitemap_candidates.append(loc)
+                break
+    except Exception as exc:
+        logging.warning("中国星市场 sitemap 索引获取失败: %s", exc)
+
+    if fallback_url not in sitemap_candidates:
+        sitemap_candidates.append(fallback_url)
+
+    candidate_links: list[str] = []
+    for sitemap_url in sitemap_candidates:
+        try:
+            resp = requests.get(sitemap_url, headers=DEFAULT_HEADERS, timeout=20)
+            resp.raise_for_status()
+            root = ET.fromstring(resp.text)
+
+            for url_node in root.findall("./url"):
+                loc = (url_node.findtext("loc") or "").strip()
+                lastmod = (url_node.findtext("lastmod") or "").strip()
+                if not loc or "/detail/" not in loc:
+                    continue
+                if lastmod[:10] != target_cn_date_str:
+                    continue
+                candidate_links.append(loc)
+
+            if candidate_links:
+                return candidate_links
+        except Exception as exc:
+            logging.warning("中国星市场 sitemap 获取失败: %s - %s", sitemap_url, exc)
+
+    return candidate_links
+
+
 def fetch_chinastarmarket_for_yesterday(
     source_name: str, source_url: str, start_utc: datetime, end_utc: datetime
 ) -> list[NewsItem]:
     target_cn_date = start_utc.astimezone(CHINA_TZ).date()
     month_str = target_cn_date.strftime("%Y%m")
-    sitemap_url = f"https://rss.chinastarmarket.cn/kcb/baidu/{month_str}/sitemap.xml"
 
     subject_id: str | None = None
     subject_match = re.search(r"/subject/(\d+)", source_url)
     if subject_match:
         subject_id = subject_match.group(1)
 
-    try:
-        resp = requests.get(sitemap_url, headers=DEFAULT_HEADERS, timeout=20)
-        resp.raise_for_status()
-        root = ET.fromstring(resp.text)
-    except Exception as exc:
-        logging.warning("中国星市场 sitemap 获取失败: %s - %s", source_name, exc)
+    candidate_links = _collect_chinastarmarket_detail_links(
+        month_str=month_str,
+        target_cn_date_str=target_cn_date.isoformat(),
+    )
+    if not candidate_links:
+        logging.warning("中国星市场无可用 sitemap 数据: %s", source_name)
         return []
-
-    candidate_links: list[str] = []
-    for url_node in root.findall("./url"):
-        loc = (url_node.findtext("loc") or "").strip()
-        lastmod = (url_node.findtext("lastmod") or "").strip()
-        if not loc or "/detail/" not in loc:
-            continue
-        if lastmod[:10] != target_cn_date.isoformat():
-            continue
-        candidate_links.append(loc)
 
     # Cap detail-page requests to control runtime in CI.
     max_detail_fetch = 120
