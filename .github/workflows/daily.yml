@@ -30,6 +30,7 @@ jobs:
           OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           MODEL_NAME: ${{ secrets.MODEL_NAME }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          BAIDU_API_KEY: ${{ secrets.BAIDU_API_KEY }}
         run: |
           python ai-news-agent/main.py --mode full
 

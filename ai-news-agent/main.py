@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from xml.etree import ElementTree as ET
 
 import feedparser
@@ -183,6 +183,15 @@ def fetch_chinastarmarket_for_yesterday(
     if subject_match:
         subject_id = subject_match.group(1)
 
+    subject_names: list[str] = []
+    parsed = urlparse(source_url)
+    q = parse_qs(parsed.query)
+    for key in ("subject_name", "tag", "tags"):
+        vals = q.get(key, [])
+        for v in vals:
+            subject_names.extend([s.strip() for s in v.split(",") if s.strip()])
+    subject_names = [s.lower() for s in subject_names]
+
     candidate_links = _collect_chinastarmarket_detail_links(
         month_str=month_str,
         target_cn_date_str=target_cn_date.isoformat(),
@@ -217,6 +226,14 @@ def fetch_chinastarmarket_for_yesterday(
             if subject_id:
                 if not any(
                     isinstance(s, dict) and str(s.get("id", "")) == subject_id
+                    for s in subjects
+                ):
+                    continue
+
+            if subject_names:
+                if not any(
+                    isinstance(s, dict)
+                    and str(s.get("name", "")).strip().lower() in subject_names
                     for s in subjects
                 ):
                     continue
@@ -391,7 +408,8 @@ def build_prompt(news_items: list[NewsItem], target_date_cn: str) -> str:
 
     return (
         f"你是 AI 行业新闻编辑。请基于给定新闻，输出 {target_date_cn}（北京时间）的 AI 新闻中文简报。\\n"
-        "输出风格对齐参考样例：标题 + 开篇总览 + 分点事件。\\n"
+        "用户定位：作为一个 AIGC 爱好者，关注 AI 编码、智能体、工作流、AI 新模型。\\n"
+        "输出风格：先整体总结，再分点事件。\\n"
         "要求：\\n"
         "0) 只保留以下赛道：\\n"
         "- 国内外 AI 编程与智能体（Agent）\\n"
@@ -405,7 +423,7 @@ def build_prompt(news_items: list[NewsItem], target_date_cn: str) -> str:
         "4) 国外新闻最多保留 3 条，其余优先中文来源新闻。\\n"
         "5) 标题固定为：全球AI产业要闻简报 | 24小时内\\n"
         "6) 在标题下一行单独写日期：日期：YYYY-MM-DD（北京时间，使用给定日期）。\\n"
-        "7) 开篇总览：2-4 句，概括本日最大趋势与方向，避免空话。\\n"
+        "7) 整体总结：2-4 句，概括本日最大趋势与方向，避免空话。\\n"
         "8) 分点事件：用 1..N 编号。每条格式如下：\\n"
         "1. 简短标题（不超过20字，聚焦动作/突破）\\n"
         "• 要点1（核心事实）\\n"
@@ -442,6 +460,34 @@ def summarize_with_openai(client: OpenAI, model_name: str, news_items: list[News
     )
 
     return response.choices[0].message.content.strip()
+
+
+def summarize_with_baidu_search(api_key: str, target_date_cn: str) -> str | None:
+    url = "https://qianfan.baidubce.com/v2/ai_search/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    prompt = (
+        f"你是 AI 行业新闻编辑。请基于全网搜索结果，输出 {target_date_cn}（北京时间）"
+        "AI 新闻热点简报。"
+        "用户定位：AIGC 爱好者，关注 AI 编码、智能体、工作流、AI 新模型。"
+        "输出格式：先整体总结（2-4句），再分点事件（1..N）。"
+        "每条需附上原始链接。"
+    )
+    body = {
+        "messages": [
+            {"role": "user", "content": prompt},
+        ]
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+    except Exception as exc:
+        logging.warning("百度智能搜索生成调用失败: %s", exc)
+        return None
 
 
 def push_to_feishu(webhook: str, content: str, target_date_cn: str) -> None:
@@ -503,6 +549,7 @@ def main() -> None:
     openai_base_url = os.getenv("OPENAI_BASE_URL", "").strip()
     model_name = os.getenv("MODEL_NAME", "gpt-4.1-mini").strip()
     feishu_webhook = os.getenv("FEISHU_WEBHOOK", "").strip()
+    baidu_api_key = os.getenv("BAIDU_API_KEY", "").strip()
 
     if not openai_api_key:
         raise EnvironmentError("full 模式缺少环境变量 OPENAI_API_KEY")
@@ -511,6 +558,15 @@ def main() -> None:
 
     client = OpenAI(api_key=openai_api_key, base_url=openai_base_url or None)
     summary = summarize_with_openai(client, model_name, items, target_date_cn)
+    if baidu_api_key:
+        baidu_summary = summarize_with_baidu_search(baidu_api_key, target_date_cn)
+        if baidu_summary:
+            summary = (
+                f"{summary}\n\n"
+                "——\n"
+                "AI 全网检索简报\n"
+                f"{baidu_summary}"
+            )
     push_to_feishu(feishu_webhook, summary, target_date_cn)
 
     logging.info("Full mode done. Feishu message sent successfully.")
