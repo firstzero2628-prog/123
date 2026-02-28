@@ -4,6 +4,10 @@ sources:
     url: https://www.qbitai.com/feed
   - name: 36Kr
     url: https://36kr.com/feed
+  - name: InfoQ
+    url: https://www.infoq.cn/feed
+  - name: 雷峰网
+    url: https://www.leiphone.com/feed
   - name: TechCrunch AI
     url: https://techcrunch.com/category/artificial-intelligence/feed/
   - name: VentureBeat AI
