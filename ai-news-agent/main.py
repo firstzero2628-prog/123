@@ -565,6 +565,44 @@ def summarize_with_baidu_search(
         return None
 
 
+def compose_final_digest(
+    client: OpenAI,
+    model_name: str,
+    target_date_cn: str,
+    source_digest: str,
+    web_digest: str | None,
+) -> str:
+    prompt = (
+        f"你是 AI 行业新闻编辑。请将下方两段简报合并重排，输出 {target_date_cn}（北京时间）的一份最终简报。\\n"
+        "目标：保留最重要的 10 条（不足则按实际数量）。\\n"
+        "优先级从高到低：AI 编程、AI 智能体、AI 工作流、AI 新模型、AIGC。\\n"
+        "去重、合并相同事件，避免重复。\\n"
+        "输出格式要清晰易读：\\n"
+        "标题：全球AI产业要闻简报 | 24小时内\\n"
+        "日期：YYYY-MM-DD（北京时间，使用给定日期）\\n"
+        "整体总结：2-4 句\\n"
+        "分点事件（1..N）：\\n"
+        "1. 简短标题（<=20字）\\n"
+        "• 要点1\\n"
+        "• 要点2\\n"
+        "信源：来源名（链接）\\n"
+        "末尾：今日总体观察 2-3 句\\n\\n"
+        "简报A（抓取源）：\\n"
+        f"{source_digest}\\n\\n"
+        "简报B（全网检索）：\\n"
+        f"{web_digest or '无'}"
+    )
+    response = client.chat.completions.create(
+        model=model_name,
+        temperature=0.2,
+        messages=[
+            {"role": "system", "content": "你是严谨的科技媒体编辑。"},
+            {"role": "user", "content": prompt},
+        ],
+    )
+    return response.choices[0].message.content.strip()
+
+
 def push_to_feishu(webhook: str, content: str, target_date_cn: str) -> None:
     body = {
         "msg_type": "text",
@@ -638,11 +676,12 @@ def main() -> None:
             baidu_api_key, target_date_cn, client=client, model_name=model_name
         )
         if baidu_summary:
-            summary = (
-                f"{summary}\n\n"
-                "——\n"
-                "AI 全网检索简报\n"
-                f"{baidu_summary}"
+            summary = compose_final_digest(
+                client,
+                model_name,
+                target_date_cn,
+                summary,
+                baidu_summary,
             )
     push_to_feishu(feishu_webhook, summary, target_date_cn)
 
