@@ -462,7 +462,12 @@ def summarize_with_openai(client: OpenAI, model_name: str, news_items: list[News
     return response.choices[0].message.content.strip()
 
 
-def summarize_with_baidu_search(api_key: str, target_date_cn: str) -> str | None:
+def summarize_with_baidu_search(
+    api_key: str,
+    target_date_cn: str,
+    client: OpenAI | None = None,
+    model_name: str | None = None,
+) -> str | None:
     url = "https://qianfan.baidubce.com/v2/ai_search/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -478,7 +483,8 @@ def summarize_with_baidu_search(api_key: str, target_date_cn: str) -> str | None
     body = {
         "messages": [
             {"role": "user", "content": prompt},
-        ]
+        ],
+        "stream": False,
     }
     try:
         resp = requests.post(url, headers=headers, json=body, timeout=30)
@@ -507,7 +513,52 @@ def summarize_with_baidu_search(api_key: str, target_date_cn: str) -> str | None
                 content = msg.get("content")
                 if content:
                     return content
-        logging.warning("百度智能搜索生成返回结构无法解析，keys=%s", list(data.keys()) if isinstance(data, dict) else type(data))
+        references = []
+        if isinstance(data, dict):
+            references = data.get("references") or data.get("data", {}).get("references") or []
+        if references:
+            logging.info("百度智能搜索生成仅返回 references，count=%d", len(references))
+            if client and model_name:
+                ref_lines = []
+                for ref in references[:10]:
+                    title = (ref.get("title") or "").strip()
+                    url = (ref.get("url") or "").strip()
+                    snippet = (ref.get("snippet") or ref.get("summary") or "").strip()
+                    if title and url:
+                        ref_lines.append(f"- {title}\\n  链接：{url}\\n  摘要：{snippet}")
+                prompt2 = (
+                    f"请基于以下检索参考，生成 {target_date_cn}（北京时间）"
+                    "AI 新闻热点简报。"
+                    "用户定位：AIGC 爱好者，关注 AI 编码、智能体、工作流、AI 新模型。"
+                    "输出格式：先整体总结（2-4句），再分点事件（1..N）。"
+                    "每条需附上原始链接。\\n\\n"
+                    "参考：\\n" + "\\n".join(ref_lines)
+                )
+                try:
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        temperature=0.2,
+                        messages=[
+                            {"role": "system", "content": "你是严谨的科技媒体编辑。"},
+                            {"role": "user", "content": prompt2},
+                        ],
+                    )
+                    return response.choices[0].message.content.strip()
+                except Exception as exc:
+                    logging.warning("基于 references 生成简报失败: %s", exc)
+            # Fallback: list references only.
+            fallback = ["未返回生成文本，以下为检索链接："]
+            for ref in references[:10]:
+                title = (ref.get("title") or "").strip()
+                url = (ref.get("url") or "").strip()
+                if title and url:
+                    fallback.append(f"- {title} {url}")
+            return "\\n".join(fallback)
+
+        logging.warning(
+            "百度智能搜索生成返回结构无法解析，keys=%s",
+            list(data.keys()) if isinstance(data, dict) else type(data),
+        )
         return None
     except Exception as exc:
         logging.warning("百度智能搜索生成调用失败: %s", exc)
@@ -583,7 +634,9 @@ def main() -> None:
     client = OpenAI(api_key=openai_api_key, base_url=openai_base_url or None)
     summary = summarize_with_openai(client, model_name, items, target_date_cn)
     if baidu_api_key:
-        baidu_summary = summarize_with_baidu_search(baidu_api_key, target_date_cn)
+        baidu_summary = summarize_with_baidu_search(
+            baidu_api_key, target_date_cn, client=client, model_name=model_name
+        )
         if baidu_summary:
             summary = (
                 f"{summary}\n\n"
