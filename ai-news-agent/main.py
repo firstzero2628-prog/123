@@ -51,6 +51,17 @@ EXCLUDE_KEYWORDS = [
     "ai 金融", "金融", "证券", "基金", "股市", "银行", "保险", "理财", "投顾", "ipo",
 ]
 
+# User preference filter: keep only items that match these focus keywords.
+# Set to empty list to disable this stricter filter.
+PREFERRED_KEYWORDS = [
+    "智能体", "agent", "编程平台", "编程", "coding",
+    "deepseek", "v4", "推理性能", "视频模型", "多模态",
+    "榜", "排行", "第一梯队", "DAU", "日活", "千问",
+    "nano banana", "图像生成", "gemini", "手机助手",
+    "codex", "figma", "健康", "医疗", "健康助手",
+    "openclaw", "围城", "生态",
+]
+
 
 @dataclass
 class NewsItem:
@@ -312,7 +323,13 @@ def is_relevant_ai_news(item: NewsItem) -> bool:
     if any(k.lower() in hay for k in EXCLUDE_KEYWORDS):
         return False
 
-    return any(k.lower() in hay for k in INCLUDE_KEYWORDS)
+    if not any(k.lower() in hay for k in INCLUDE_KEYWORDS):
+        return False
+
+    if PREFERRED_KEYWORDS:
+        return any(k.lower() in hay for k in PREFERRED_KEYWORDS)
+
+    return True
 
 
 def normalize_and_filter_items(news_items: list[NewsItem]) -> list[NewsItem]:
