@@ -484,7 +484,31 @@ def summarize_with_baidu_search(api_key: str, target_date_cn: str) -> str | None
         resp = requests.post(url, headers=headers, json=body, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        return (data.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+        # Try multiple common response shapes.
+        if isinstance(data, dict):
+            if "result" in data:
+                if isinstance(data["result"], str):
+                    return data["result"]
+                if isinstance(data["result"], dict):
+                    text = data["result"].get("text") or data["result"].get("content")
+                    if text:
+                        return text
+            if "response" in data and isinstance(data["response"], str):
+                return data["response"]
+            if "output" in data:
+                if isinstance(data["output"], str):
+                    return data["output"]
+                if isinstance(data["output"], dict):
+                    text = data["output"].get("text") or data["output"].get("content")
+                    if text:
+                        return text
+            if "choices" in data and data["choices"]:
+                msg = (data.get("choices", [{}])[0].get("message", {}) or {})
+                content = msg.get("content")
+                if content:
+                    return content
+        logging.warning("百度智能搜索生成返回结构无法解析，keys=%s", list(data.keys()) if isinstance(data, dict) else type(data))
+        return None
     except Exception as exc:
         logging.warning("百度智能搜索生成调用失败: %s", exc)
         return None
