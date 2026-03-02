@@ -36,32 +36,44 @@ DEFAULT_HEADERS = {
 # 2) New models/tech (including open source)
 # 3) Product iteration of model companies
 # 4) Model architecture and training efficiency
-INCLUDE_KEYWORDS = [
-    "ai 编程", "ai coding", "code agent", "coding agent", "agent", "智能体", "多智能体", "copilot",
-    "cursor", "devin", "claude code", "代码生成", "代码助手", "编程助手",
-    "大模型", "foundation model", "llm", "vlm", "multimodal", "多模态",
-    "模型发布", "模型开源", "open source", "开源模型", "推理优化", "蒸馏", "微调", "对齐",
-    "训练效率", "训练成本", "模型架构", "transformer", "moe", "long context", "rag",
-    "openai", "anthropic", "google deepmind", "gemini", "claude", "kimi", "deepseek", "qwen", "通义", "豆包",
-    "产品更新", "版本更新", "api 更新", "功能发布", "发布会",
-]
+INCLUDE_KEYWORD_GROUPS = {
+    "coding_and_agents": [
+        "ai 编程", "ai coding", "code agent", "coding agent", "agent", "智能体", "多智能体",
+        "copilot", "cursor", "devin", "claude code", "代码生成", "代码助手", "编程助手",
+        "编程平台", "codex", "openclaw",
+    ],
+    "models_and_tech": [
+        "大模型", "foundation model", "llm", "vlm", "multimodal", "多模态",
+        "模型发布", "模型开源", "open source", "开源模型", "推理优化", "推理性能",
+        "蒸馏", "微调", "对齐", "模型架构", "transformer", "moe", "long context", "rag",
+        "v4", "视频模型", "图像生成", "nano banana",
+    ],
+    "companies_and_products": [
+        "openai", "anthropic", "google deepmind", "gemini", "claude",
+        "kimi", "deepseek", "qwen", "通义", "千问", "豆包",
+        "产品更新", "版本更新", "api 更新", "功能发布", "发布会", "手机助手", "figma",
+    ],
+    "market_and_ecosystem": [
+        "榜", "排行", "第一梯队", "dau", "日活", "生态", "围城",
+    ],
+    "healthcare": [
+        "健康", "医疗", "健康助手",
+    ],
+}
+
+# Preserve declared order while removing duplicates.
+INCLUDE_KEYWORDS = list(
+    dict.fromkeys(
+        keyword
+        for keywords in INCLUDE_KEYWORD_GROUPS.values()
+        for keyword in keywords
+    )
+)
 
 EXCLUDE_KEYWORDS = [
     "ai 芯片", "芯片", "gpu", "npu", "算力卡", "半导体",
     "ai 金融", "金融", "证券", "基金", "股市", "银行", "保险", "理财", "投顾", "ipo",
 ]
-
-# User preference filter: keep only items that match these focus keywords.
-# Set to empty list to disable this stricter filter.
-PREFERRED_KEYWORDS = [
-    "智能体", "agent", "编程平台", "编程", "coding",
-    "deepseek", "v4", "推理性能", "视频模型", "多模态",
-    "榜", "排行", "第一梯队", "DAU", "日活", "千问",
-    "nano banana", "图像生成", "gemini", "手机助手",
-    "codex", "figma", "健康", "医疗", "健康助手",
-    "openclaw", "围城", "生态",
-]
-
 
 @dataclass
 class NewsItem:
@@ -342,9 +354,6 @@ def is_relevant_ai_news(item: NewsItem) -> bool:
 
     if not any(k.lower() in hay for k in INCLUDE_KEYWORDS):
         return False
-
-    if PREFERRED_KEYWORDS:
-        return any(k.lower() in hay for k in PREFERRED_KEYWORDS)
 
     return True
 
